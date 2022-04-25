@@ -1,5 +1,8 @@
 # kng1_analysis
 
+[![DOI](https://zenodo.org/badge/424333512.svg)](https://zenodo.org/badge/latestdoi/424333512)
+
+
 Code repository (meant to be viewed and not executed) for 'Alterations in the kallikrein-kinin system predicts death after heart transplant' by Giangreco et al.
 
 The clinical characteristics table-one tables in the paper were created using tableone.R
