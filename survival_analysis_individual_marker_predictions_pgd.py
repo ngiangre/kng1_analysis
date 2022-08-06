@@ -43,32 +43,29 @@ models = {
 classification_metrics = ['roc_auc']
 cv_split = 10
 test_size = 0.15
-n_jobs = 25
+n_jobs = 4
 nboot=200
 
-X_all_proteins = pd.read_csv(dir_+'integrated_X_raw_all_proteins.csv',index_col=0)
+X_all_proteins = pd.read_csv(dir_+'integrated_X_raw_all_proteins_dedup.csv',index_col=0)
 proteins_no_immunoglobulins = pickle.load(open(dir_+'proteins_no_immunoglobulins.pkl','rb'))
 X_all_proteins = X_all_proteins.loc[:,proteins_no_immunoglobulins]
 
-joined = pd.read_csv(dir_+'mortality_X_y.csv',index_col=0)
-X_all_clinical = pd.read_csv(dir_+'integrated_X_clinical_and_cohort_covariates.csv',index_col=0)
-Y_pgd = pd.read_csv(dir_+'integrated_pgd_y.csv',index_col=0,header=None)
-Y_pgd.columns = ['PGD']
-X_all_clinical = X_all_clinical.join(Y_pgd)
-Y_mortality = joined[['expired']]
-Y_mortality.index.name=''
-X_all_clinical = X_all_clinical.join(Y_mortality)
-Y_lvad = joined[['Mechanical_Support_Y']]
-Y_lvad.index.name=''
+joined = pd.read_csv(dir_+'mortality_X_y_dedup.csv',index_col=0)
+cov_df = joined.loc[:,
+                   ['Cohort_Columbia','Cohort_Cedar','Cohort_Paris']
+                  ]
+Y_survival = (joined[['expired']]==0).astype(int)
+Y_survival.columns = ['Survival']
+Y_survival.index.name=''
+clinical_variables = pickle.load(open(dir_+'prediction_clinical_variables.pickle','rb'))
+X_all_clinical = joined.loc[:,clinical_variables].join(Y_survival).join(cov_df)
+Y_pgd = joined['PGD']
+X_all_clinical = X_all_clinical.drop('PGD',axis=1)
 
 idmap_sub = pd.read_csv(dir_+'protein_gene_map_full.csv')[['Protein','Gene_name']].dropna()
 
-cov_df = X_all_clinical.loc[:,['Cohort_Columbia','Cohort_Cedar']].copy().astype(int)
-all_cov_df = cov_df.copy()
-all_cov_df.loc[:,'Cohort_Paris'] = (
-    (all_cov_df['Cohort_Columbia'] + 
-     all_cov_df['Cohort_Cedar'])==0).astype(int)
-
+all_cov_df = X_all_clinical.loc[:,['Cohort_Columbia','Cohort_Cedar','Cohort_Paris']]
+all_cov_df.index.name = 'Sample'
 
 params = {'Y' : Y_pgd, 'cv_split' : cv_split, 
 		  'metrics' : classification_metrics, 'n_jobs' : 1, 
@@ -181,6 +178,7 @@ def train_test_val_top_fold_01_within(X,Y,models,metrics=['roc_auc'],cv_split=10
 	X_train, X_test, y_train, y_test = train_test_split(X,Y,
                                                             test_size=test_size,
                                                             random_state=seed,
+                                                            stratify=Y,
                                                             shuffle=True)
 	X_train = X_train.apply(lambda x : (x - min(x))/(max(x) - min(x)),axis=0)
 	X_test = X_test.apply(lambda x : (x - min(x))/(max(x) - min(x)),axis=0)
@@ -227,7 +225,7 @@ def train_test_val_top_fold_01_within(X,Y,models,metrics=['roc_auc'],cv_split=10
 		for metric in metrics:
 			tmp['validation_'+metric] = m.SCORERS[metric](fitted,X_test,y_test)
 		model_retrained_fits[name] = fitted
-		dfs.append(tmp.query('fold==@top_fold').drop('fold',1))
+		dfs.append(tmp.query('fold==@top_fold').drop('fold',axis=1))
 	return pd.concat(dfs,sort=True).reset_index(drop=True), model_retrained_fits, pd.concat(model_confs,sort=True)
 
 def permuted_train_test_val_top_fold_01_within(X,Y,models,metrics=['roc_auc'],cv_split=10,seed=42,test_size=0.15,return_train_score=True,n_jobs=1,retrained_models=False,patient_level_predictions=False,return_estimator=True):
@@ -241,6 +239,7 @@ def permuted_train_test_val_top_fold_01_within(X,Y,models,metrics=['roc_auc'],cv
 	X_train, X_test, y_train, y_test = train_test_split(X_shuffle,Y_shuffle,
                                                             test_size=test_size,
                                                             random_state=seed,
+                                                            stratify=Y,
                                                             shuffle=True)
 	X_train = X_train.apply(lambda x : (x - min(x))/(max(x) - min(x)),axis=0)
 	X_test = X_test.apply(lambda x : (x - min(x))/(max(x) - min(x)),axis=0)
@@ -285,9 +284,12 @@ def permuted_train_test_val_top_fold_01_within(X,Y,models,metrics=['roc_auc'],cv
 		model_confs.append(conf)
 		#do prediction for each metric
 		for metric in metrics:
-			tmp['validation_'+metric] = m.SCORERS[metric](fitted,X_test,y_test)
+			try:
+				tmp['validation_'+metric] = m.SCORERS[metric](fitted,X_test,y_test)
+			except ValueError:
+				tmp['validation_'+metric] = 0.5
 		model_retrained_fits[name] = fitted
-		dfs.append(tmp.query('fold==@top_fold').drop('fold',1))
+		dfs.append(tmp.query('fold==@top_fold').drop('fold',axis=1))
 	return pd.concat(dfs,sort=True).reset_index(drop=True), model_retrained_fits, pd.concat(model_confs,sort=True)
 
 def bootstrap_of_fcn(func=None,params={},n_jobs=4,nboot=2):
@@ -352,63 +354,7 @@ def patient_predictions(lst):
               var_name='cohort',value_name='mem')
         )
         dat.cohort = dat.cohort.str.split('_').apply(lambda x : x[1])
-        dat = dat[dat.mem==1].drop('mem',1).reset_index(drop=True)
-        return dat
-
-def get_performance(lst):
-    perf = (pd.
-            concat(lst,keys=range(len(lst))).
-            reset_index(level=1,drop=True).
-            rename_axis('bootstrap').
-            reset_index()
-           )
-    return perf
-
-def model_feature_importances(boot_mods):
-    dfs = []
-    X = params['X'].copy()
-    X.loc[:,'Intercept'] = 0
-    for i in range(len(boot_mods)):
-        for j in boot_mods[i].keys():
-            mod = boot_mods[i][j]
-            coef = []
-            try:
-                coef.extend([i for i in mod.feature_importances_])
-            except:
-                coef.extend([i for i in mod.coef_[0]])
-            coef.extend(mod.intercept_)
-            fs = []
-            fs.extend(X.columns.values)
-            df = pd.DataFrame({
-                'Feature' : fs,
-                'Gene_name' : (X.T.
-                               join(idmap_sub.
-                                    set_index('Protein'),how='left').
-                               Gene_name.values),
-                'Importance' : coef,
-                'Model' : j,
-                'Bootstrap' : i
-            })
-            dfs.append(df)
-    return pd.concat(dfs,sort=True)
-
-def patient_predictions(lst):
-        col = pd.concat(lst).index.name
-        dat = \
-        (pd.
-         concat(
-             lst
-         ).
-         reset_index().
-         rename(columns={col : 'Sample'}).
-         set_index('Sample').
-         join(all_cov_df).
-         reset_index().
-         melt(id_vars=['Sample','bootstrap','model','y_true','y_pred','y_proba'],
-              var_name='cohort',value_name='mem')
-        )
-        dat.cohort = dat.cohort.str.split('_').apply(lambda x : x[1])
-        dat = dat[dat.mem==1].drop('mem',1).reset_index(drop=True)
+        dat = dat[dat.mem==1].drop('mem',axis=1).reset_index(drop=True)
         return dat
 
 import itertools
@@ -557,7 +503,7 @@ perf_df = (
     ).
     sort_values('2.5%')
 )
-perf_df.to_csv(dir_+'mortality_predictions_'+type_+'_performance_pgd.csv')
+perf_df.to_csv(dir_+'mortality_predictions_'+type_+'_performance_survival_pgd.csv')
 
 fimps_df = (
     fimps_df.
@@ -570,10 +516,10 @@ fimps_df = (
     ).
     sort_values('2.5%')
 )
-fimps_df.to_csv(dir_+'mortality_predictions_'+type_+'_feature_importance_pgd.csv')
+fimps_df.to_csv(dir_+'mortality_predictions_'+type_+'_feature_importance_survival_pgd.csv')
 
-ppreds_df.to_csv(dir_+'mortality_predictions_'+type_+'_patient_predictions_pgd.csv')
+ppreds_df.to_csv(dir_+'mortality_predictions_'+type_+'_patient_predictions_survival_pgd.csv')
 
 
-pd.concat(fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_feature_importance_pgd.csv')
-pd.concat(perm_fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_permuted_feature_importance_pgd.csv')
+pd.concat(fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_feature_importance_survival_pgd.csv')
+pd.concat(perm_fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_permuted_feature_importance_survival_pgd.csv')

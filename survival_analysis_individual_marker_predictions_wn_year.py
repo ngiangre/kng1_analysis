@@ -41,7 +41,7 @@ models = {
 		 }
 
 classification_metrics = ['roc_auc']
-cv_split = 10
+cv_split = 5
 test_size = 0.15
 n_jobs = 4
 nboot=200
@@ -54,18 +54,18 @@ joined = pd.read_csv(dir_+'mortality_X_y_dedup.csv',index_col=0)
 cov_df = joined.loc[:,
                    ['Cohort_Columbia','Cohort_Cedar','Cohort_Paris']
                   ]
-Y_survival = (joined[['expired']]==0).astype(int)
-Y_survival.columns = ['Survival']
-Y_survival.index.name=''
+Y_expired_wn_year = pd.DataFrame([],index=joined.index)
+Y_expired_wn_year[['expired_wn_year']] = 0.
+Y_expired_wn_year.loc[joined.index[joined.days_to_death<=365],'expired_wn_year'] = 1.
 clinical_variables = pickle.load(open(dir_+'prediction_clinical_variables.pickle','rb'))
-X_all_clinical = joined.loc[:,clinical_variables].join(Y_survival).join(cov_df)
+X_all_clinical = joined.loc[:,clinical_variables].join(Y_expired_wn_year).join(cov_df)
 
 idmap_sub = pd.read_csv(dir_+'protein_gene_map_full.csv')[['Protein','Gene_name']].dropna()
 
 all_cov_df = X_all_clinical.loc[:,['Cohort_Columbia','Cohort_Cedar','Cohort_Paris']]
 all_cov_df.index.name = 'Sample'
 
-params = {'Y' : Y_survival, 'cv_split' : cv_split, 
+params = {'Y' : Y_expired_wn_year, 'cv_split' : cv_split, 
 		  'metrics' : classification_metrics, 'n_jobs' : 1, 
 		  'test_size' : test_size,
 		  'retrained_models' : True, 'patient_level_predictions' : True}
@@ -501,7 +501,7 @@ perf_df = (
     ).
     sort_values('2.5%')
 )
-perf_df.to_csv(dir_+'mortality_predictions_'+type_+'_performance_survival.csv')
+perf_df.to_csv(dir_+'mortality_predictions_'+type_+'_performance_survival_expired_wn_year.csv')
 
 fimps_df = (
     fimps_df.
@@ -514,10 +514,10 @@ fimps_df = (
     ).
     sort_values('2.5%')
 )
-fimps_df.to_csv(dir_+'mortality_predictions_'+type_+'_feature_importance_survival.csv')
+fimps_df.to_csv(dir_+'mortality_predictions_'+type_+'_feature_importance_survival_expired_wn_year.csv')
 
-ppreds_df.to_csv(dir_+'mortality_predictions_'+type_+'_patient_predictions_survival.csv')
+ppreds_df.to_csv(dir_+'mortality_predictions_'+type_+'_patient_predictions_survival_expired_wn_year.csv')
 
 
-pd.concat(fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_feature_importance_survival.csv')
-pd.concat(perm_fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_permuted_feature_importance_survival.csv')
+pd.concat(fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_feature_importance_survival_expired_wn_year.csv')
+pd.concat(perm_fimps_dfs).to_csv(dir_+'mortality_predictions_'+type_+'_full_permuted_feature_importance_survival_expired_wn_year.csv')

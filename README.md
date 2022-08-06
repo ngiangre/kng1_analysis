@@ -11,7 +11,9 @@ The prediction methods and computations were performed on a multicluster machine
 
 * `survival_analysis_individual_marker_predictions.py` for overall survival, 
 
-* `survival_analysis_individual_marker_predictions_pgdcov.py` for overall survival accounting for PGD status,
+* `survival_analysis_individual_marker_predictions_wn_year.py` for 1-year survival, 
+
+* `survival_analysis_individual_marker_predictions_wpgdcov.py` for overall survival accounting for PGD status,
 
 * `survival_analysis_individual_marker_predictions_pgd.py` for PGD, and  
 
